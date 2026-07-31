@@ -1,0 +1,25 @@
+# 1. Start Redis
+cd agentic-noc
+docker compose up -d redis
+
+# 2. Terminal A — Start the verification consumer
+cd ai-reasoning
+
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+
+pip install -r requirements.txt
+python consumer_demo.py
+
+# 3. Terminal B — Run a diagnosis and publish evidence
+cd diagnostics-engine
+
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+
+pip install -r requirements.txt
+python -m src.main --target example.com --publish
+
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
+docker compose down

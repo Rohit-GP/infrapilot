@@ -1,0 +1,5 @@
+redis==5.0.8
+python-dotenv==1.0.1
+# LangGraph + LLM client deps get added in Phase 4:
+# langgraph==0.2.*
+# langchain-groq==0.1.*        # or langchain-google-genai for Gemini Flash

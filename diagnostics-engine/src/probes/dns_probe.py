@@ -19,7 +19,9 @@ from src.core.config import ProbeConfig
 def _resolve_via_system(target: str, timeout_s: float) -> tuple[list[str], float]:
     socket.setdefaulttimeout(timeout_s)
     start = time.perf_counter()
-    _, _, ip_list = socket.gethostbyname_ex(target)
+    # _, _, ip_list = socket.gethostbyname_ex(target)
+    results = socket.getaddrinfo(target, None)
+    ip_list = sorted({item[4][0] for item in results})
     elapsed_ms = (time.perf_counter() - start) * 1000
     return ip_list, elapsed_ms
 
