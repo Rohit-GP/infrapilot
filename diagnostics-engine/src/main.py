@@ -37,11 +37,15 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
 
+    service_url = args.service_url
+    if service_url is None:
+        service_url = f"https://{args.target}"
+
     config = ProbeConfig(
         target=args.target,
         ports=[int(p) for p in args.ports.split(",") if p.strip()],
         dns_server=args.dns_server,
-        service_check_url=args.service_url,
+        service_check_url=service_url,
         log_path=args.log_path,
     )
     probes = [p.strip() for p in args.probes.split(",") if p.strip()]
