@@ -5,6 +5,10 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
+from dotenv import load_dotenv
+
+load_dotenv()  # picks up a .env file in the working directory if present
+
 
 @dataclass
 class ProbeConfig:
@@ -24,3 +28,6 @@ class RedisConfig:
     host: str = os.getenv("REDIS_HOST", "localhost")
     port: int = int(os.getenv("REDIS_PORT", "6379"))
     stream_name: str = os.getenv("REDIS_STREAM", "diagnostics:evidence")
+    # Consumer group the AI reasoning layer (Phase 4) will read from.
+    # Created lazily/idempotently by whoever connects first (publisher or consumer).
+    consumer_group: str = os.getenv("REDIS_CONSUMER_GROUP", "reasoning-agents")
