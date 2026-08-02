@@ -1,8 +1,27 @@
 # Diagnostics Engine (Python socket probing engine)
 
-Phase 1 of Agentic NOC. Runs ping, DNS, port, and service/log probes against
+Phase 1 of Agentic NOC. Runs various probes against
 a target and returns normalized `Evidence` objects as JSON. Fully standalone
 — no Redis, Spring Boot, or LangGraph required to run it.
+
+Diagnostics Engine
+│
+├── Network Layer
+│   ├── DNS Probe
+│   ├── Ping Probe
+│   └── Port Probe
+│
+├── Application Layer
+│   ├── HTTP Health Probe
+│   └── SSL Probe
+│
+├── System Layer
+│   ├── CPU Probe
+│   ├── Memory Probe
+│   └── Disk Probe
+│
+└── Observability Layer
+    └── Log Probe
 
 ## Setup
 
