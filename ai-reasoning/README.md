@@ -32,7 +32,7 @@ Phase 4.
 
 ## Planned agents (Phase 4, not started)
 
-- `network_agent.py` — reasons over ping/DNS/port evidence
-- `database_agent.py` — reasons over DB connection/query evidence
-- `infrastructure_agent.py` — reasons over container/process/CPU/mem evidence
-- `coordinator.py` — merges agent outputs into final verdict + confidence + fix
+- `network_agent.py` - reasons over ping/DNS/port evidence
+- `database_agent.py` - reasons over DB connection/query evidence
+- `infrastructure_agent.py` - reasons over container/process/CPU/mem evidence
+- `coordinator.py` - merges agent outputs into final verdict + confidence + fix
