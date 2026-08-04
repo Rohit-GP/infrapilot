@@ -4,14 +4,14 @@
 
 ```
 React UI --(1)--> Spring Boot --(2)--> Python probing engine
-                       ^                        |
+                       ^                         |
                        |                      (3) publish
-                     (6) push               structured evidence
-                    status/result                |
-                       |                          v
-                  PostgreSQL <--(5)-- LangGraph agents <--(4)-- Redis Stream
-                                    (Network/DB/Infra +
-                                       Coordinator)
+                   (6) push               structured evidence
+                 status/result                   |
+                       |                         v
+                  PostgreSQL  <--(5)--  LangGraph agents  <--(4)-- Redis Stream
+                                       (Network/DB/Infra +
+                                          Coordinator)
 ```
 
 1. User clicks "Run Diagnosis" → Spring Boot creates a job (`queued`), opens
