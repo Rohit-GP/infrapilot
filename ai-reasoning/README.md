@@ -1,11 +1,11 @@
-# AI Reasoning Layer (LangGraph) — Phase 4
+# AI Reasoning Layer (LangGraph) - Phase 4
 
 Consumes probe evidence from Redis Streams, runs it through specialized
 agents, and merges their findings into one root-cause hypothesis.
 
 ## Right now (Phase 2 verification only)
 
-`consumer_demo.py` is **not** the real reasoning layer — it's a minimal
+`consumer_demo.py` is **not** the real reasoning layer - it's a minimal
 script that proves the Redis Streams pipeline works end-to-end, using the
 same consumer-group read pattern the real LangGraph agents will use later.
 
