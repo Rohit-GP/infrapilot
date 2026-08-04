@@ -1,9 +1,9 @@
 """
 Shared data model for probe results.
 
-Every probe (ping, dns, port, service) returns an Evidence object.
-This is the contract the rest of the system (Redis -> LangGraph agents)
-relies on, so keep it stable and probe-agnostic.
+Every probe (ping, dns, port, service, http, ssl, cpu, memory, disk)
+returns an Evidence object. This is the contract the rest of the system
+(Redis -> LangGraph agents) relies on, so keep it stable and probe-agnostic.
 """
 
 from __future__ import annotations
@@ -28,6 +28,13 @@ class ProbeType(str, Enum):
     DNS = "dns"
     PORT = "port"
     SERVICE = "service"
+    # --- Application layer ---
+    HTTP = "http"
+    SSL = "ssl"
+    # --- System layer ---
+    CPU = "cpu"
+    MEMORY = "memory"
+    DISK = "disk"
 
 
 @dataclass

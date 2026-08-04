@@ -17,22 +17,6 @@ from src.core.models import Evidence, ProbeStatus, ProbeType
 from src.core.config import ProbeConfig
 
 
-# def _check_port(host: str, port: int, timeout_s: float) -> dict:
-#     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-#     sock.settimeout(timeout_s)
-#     start = time.perf_counter()
-#     try:
-#         result_code = sock.connect_ex((host, port))
-#         elapsed_ms = (time.perf_counter() - start) * 1000
-#         if result_code == 0:
-#             return {"port": port, "open": True, "latency_ms": round(elapsed_ms, 2), "detail": "connected"}
-#         return {"port": port, "open": False, "latency_ms": round(elapsed_ms, 2), "detail": f"refused (errno {result_code})"}
-#     except socket.timeout:
-#         elapsed_ms = (time.perf_counter() - start) * 1000
-#         return {"port": port, "open": False, "latency_ms": round(elapsed_ms, 2), "detail": "timed out (likely firewalled)"}
-#     finally:
-#         sock.close()
-
 def _check_port(host: str, port: int, timeout_s: float) -> dict:
     start = time.perf_counter()
 
@@ -99,18 +83,5 @@ def run(config: ProbeConfig, job_id: str | None = None) -> Evidence:
             job_id=job_id,
         )
 
-    # except Exception as exc:  # noqa: BLE001
-    #     return Evidence.error_result(ProbeType.PORT, target, exc, job_id=job_id)
-    
-    except Exception as exc:
-        import traceback
-
-        traceback.print_exc()
-        print(f"Port probe exception: {exc!r}")
-
-        return Evidence.error_result(
-            ProbeType.PORT,
-            target,
-            exc,
-            job_id=job_id,
-        )
+    except Exception as exc:  # noqa: BLE001
+        return Evidence.error_result(ProbeType.PORT, target, exc, job_id=job_id)

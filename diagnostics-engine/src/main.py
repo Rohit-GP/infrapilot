@@ -23,8 +23,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target", required=True, help="Hostname or IP to diagnose")
     parser.add_argument("--ports", default="80,443", help="Comma-separated TCP ports to check")
     parser.add_argument("--dns-server", default=None, help="Custom DNS server IP (optional)")
-    parser.add_argument("--service-url", default=None, help="HTTP health check URL (optional)")
+    parser.add_argument("--service-url", default=None, help="HTTP health check URL for the service/log probe (optional)")
     parser.add_argument("--log-path", default=None, help="Local log file to scan (optional)")
+    parser.add_argument("--http-url", default=None, help="URL for the application-layer HTTP probe (status/text/latency checks, optional)")
     parser.add_argument(
         "--probes",
         default=",".join(PROBE_REGISTRY.keys()),
@@ -47,6 +48,7 @@ def main() -> int:
         dns_server=args.dns_server,
         service_check_url=service_url,
         log_path=args.log_path,
+        http_url=args.http_url,
     )
     probes = [p.strip() for p in args.probes.split(",") if p.strip()]
 

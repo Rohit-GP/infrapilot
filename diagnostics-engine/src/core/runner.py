@@ -12,7 +12,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from src.core.config import ProbeConfig
 from src.core.models import Evidence
-from src.probes import ping_probe, dns_probe, port_probe, service_probe
+from src.probes.network import ping_probe, dns_probe, port_probe
+from src.probes.observability import service_probe
+from src.probes.application import http_probe, ssl_probe
+from src.probes.system import cpu_probe, memory_probe, disk_probe
 
 # Registry of available probes. Add new probes here as they're built
 # (this is the extension point mentioned in Section 9 of the design doc
@@ -22,6 +25,11 @@ PROBE_REGISTRY = {
     "dns": dns_probe.run,
     "port": port_probe.run,
     "service": service_probe.run,
+    "http": http_probe.run,
+    "ssl": ssl_probe.run,
+    "cpu": cpu_probe.run,
+    "memory": memory_probe.run,
+    "disk": disk_probe.run,
 }
 
 

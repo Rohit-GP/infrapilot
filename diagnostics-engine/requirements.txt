@@ -1,4 +1,9 @@
+# --- existing (network + core) ---
 dnspython==2.6.1
 redis==5.0.8
 python-dotenv==1.0.1
 pytest==8.3.2
+
+# --- new (application + system layers) ---
+requests>=2.31.0
+psutil>=5.9.0

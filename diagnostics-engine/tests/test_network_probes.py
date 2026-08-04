@@ -12,7 +12,7 @@ import pytest
 
 from src.core.config import ProbeConfig
 from src.core.models import ProbeStatus
-from src.probes import port_probe, dns_probe
+from src.probes.network import port_probe, dns_probe
 
 
 def _get_free_port() -> int:
