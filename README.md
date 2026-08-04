@@ -15,20 +15,20 @@ over that evidence → a plain-English root cause + suggested fix comes back.
 
 ```
 agentic-noc/
-├── diagnostics-engine/     # Python socket probing engine (Phase 1 - build first)
+├── diagnostics-engine/           # Python socket probing engine (Phase 1 - build first)
 │   ├── src/
 │   │   ├── probes/
-│   │   │   ├── network/       # ping, dns, port
-│   │   │   ├── application/   # http health, ssl certificate
-│   │   │   ├── system/        # cpu, memory, disk
-│   │   │   └── observability/ # service/log checks
-│   │   └── core/           # models, runner, redis publisher, config
-│   └── tests/              # 27 tests, one file per probe layer
-├── backend-orchestration/  # Spring Boot: job lifecycle, WebSockets, safety gate (Phase 3)
-├── ai-reasoning/           # LangGraph agents: Network / Database / Infrastructure (Phase 4)
-│   └── consumer_demo.py    # Phase 2 verification only - not the real reasoning layer yet
-├── frontend/               # React dashboard (Phase 6)
-└── docs/                   # architecture notes, ADRs
+│   │   │   ├── network/          # ping, dns, port
+│   │   │   ├── application/      # http health, ssl certificate
+│   │   │   ├── system/           # cpu, memory, disk
+│   │   │   └── observability/    # service/log checks
+│   │   └── core/                 # models, runner, redis publisher, config
+│   └── tests/                    # 27 tests, one file per probe layer
+├── backend-orchestration/        # Spring Boot: job lifecycle, WebSockets, safety gate (Phase 3)
+├── ai-reasoning/                 # LangGraph agents: Network / Database / Infrastructure (Phase 4)
+│   └── consumer_demo.py          # Phase 2 verification only - not the real reasoning layer yet
+├── frontend/                     # React dashboard (Phase 6)
+└── docs/                         # architecture notes, ADRs
 ```
 
 ## Build order
