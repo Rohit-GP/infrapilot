@@ -4,6 +4,7 @@ Phase 1 of Agentic NOC. Runs various probes against
 a target and returns normalized `Evidence` objects as JSON. Fully standalone
 — no Redis, Spring Boot, or LangGraph required to run it.
 
+```
 Diagnostics Engine
 │
 ├── Network Layer
@@ -22,6 +23,7 @@ Diagnostics Engine
 │
 └── Observability Layer
     └── Log Probe
+```
 
 ## Setup
 
@@ -72,10 +74,10 @@ since it shells out to a system binary that varies by OS/container.
 
 ## Design notes
 
-- **Probes never raise** — every probe function catches its own exceptions
+- **Probes never raise** - every probe function catches its own exceptions
   and returns an `Evidence(status=ERROR, ...)` instead. The runner and CLI
   never need try/except around a probe call.
-- **`connect_ex` over `connect`** for the port probe — avoids a raised
+- **`connect_ex` over `connect`** for the port probe - avoids a raised
   exception in the hot path and lets refused-vs-timeout be read directly
   from the return code / exception path, which matters diagnostically
   (refused = something is listening but not on that port; timeout = likely
@@ -87,4 +89,4 @@ since it shells out to a system binary that varies by OS/container.
 - **Extending with DB/Infra probes**: per the design doc, add new modules
   under `src/probes/` (e.g. `db_probe.py`, `infra_probe.py`) and register
   them in `PROBE_REGISTRY` in `src/core/runner.py`. Nothing else needs to
-  change — the CLI, runner, and publisher are probe-agnostic.
+  change - the CLI, runner, and publisher are probe-agnostic.
