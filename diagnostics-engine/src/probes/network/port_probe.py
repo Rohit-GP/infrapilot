@@ -15,6 +15,7 @@ import time
 
 from src.core.models import Evidence, ProbeStatus, ProbeType
 from src.core.config import ProbeConfig
+from src.core.confidence import calculate_confidence
 
 
 def _check_port(host: str, port: int, timeout_s: float) -> dict:
@@ -72,6 +73,11 @@ def run(config: ProbeConfig, job_id: str | None = None) -> Evidence:
         else:
             status = ProbeStatus.FAILED
             message = f"No checked ports reachable: {closed_ports}"
+            
+        confidence = calculate_confidence(
+            status=status,
+            latency_ms=avg_latency
+        )
 
         return Evidence(
             probe_type=ProbeType.PORT,
@@ -80,8 +86,12 @@ def run(config: ProbeConfig, job_id: str | None = None) -> Evidence:
             latency_ms=round(avg_latency, 2) if avg_latency is not None else None,
             message=message,
             raw={"ports_checked": config.ports, "results": results},
+            confidence=confidence,
             job_id=job_id,
         )
 
     except Exception as exc:  # noqa: BLE001
-        return Evidence.error_result(ProbeType.PORT, target, exc, job_id=job_id)
+        confidence = calculate_confidence(
+            status=ProbeStatus.ERROR
+        )
+        return Evidence.error_result(ProbeType.PORT, target, exc, confidence=confidence, job_id=job_id)

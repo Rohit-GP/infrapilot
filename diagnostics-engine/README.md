@@ -4,6 +4,7 @@ Phase 1 of Agentic NOC. Runs various probes against
 a target and returns normalized `Evidence` objects as JSON. Fully standalone
 — no Redis, Spring Boot, or LangGraph required to run it.
 
+```
 Diagnostics Engine
 │
 ├── Network Layer
@@ -22,6 +23,7 @@ Diagnostics Engine
 │
 └── Observability Layer
     └── Log Probe
+```
 
 ## Setup
 
@@ -36,24 +38,25 @@ pip install -r requirements.txt
 
 ```bash
 # Basic run - ping, dns, port(80,443), service (skipped, no url/log configured)
-python -m src.main --target example.com
+py -m src.main --target example.com
 
 # Custom ports
-python -m src.main --target example.com --ports 22,80,443,8080
+py -m src.main --target example.com --ports 22,80,443,8080
 
 # Only specific probes
-python -m src.main --target example.com --probes dns,port
+py -m src.main --target example.com --probes dns,port
 
 # Use a specific DNS server (diagnose resolver-specific issues)
-python -m src.main --target example.com --dns-server 8.8.8.8
+py -m src.main --target example.com --dns-server 8.8.8.8
 
 # Include an HTTP health check and log scan
-python -m src.main --target myapp.local \
-  --service-url http://myapp.local/health \
-  --log-path /var/log/myapp/app.log
+# py -m src.main `
+#   --target localhost `
+#   --service-url http://localhost:8080/health `
+#   --log-path "C:\logs\myapp\app.log"
 
 # Publish evidence to Redis Stream (requires Redis running, Phase 2)
-python -m src.main --target example.com --publish
+py -m src.main --target example.com --publish
 ```
 
 Exit code is `1` if any probe reports `failed` or `error`, `0` otherwise —
@@ -72,10 +75,10 @@ since it shells out to a system binary that varies by OS/container.
 
 ## Design notes
 
-- **Probes never raise** — every probe function catches its own exceptions
+- **Probes never raise** - every probe function catches its own exceptions
   and returns an `Evidence(status=ERROR, ...)` instead. The runner and CLI
   never need try/except around a probe call.
-- **`connect_ex` over `connect`** for the port probe — avoids a raised
+- **`connect_ex` over `connect`** for the port probe - avoids a raised
   exception in the hot path and lets refused-vs-timeout be read directly
   from the return code / exception path, which matters diagnostically
   (refused = something is listening but not on that port; timeout = likely
@@ -87,4 +90,4 @@ since it shells out to a system binary that varies by OS/container.
 - **Extending with DB/Infra probes**: per the design doc, add new modules
   under `src/probes/` (e.g. `db_probe.py`, `infra_probe.py`) and register
   them in `PROBE_REGISTRY` in `src/core/runner.py`. Nothing else needs to
-  change — the CLI, runner, and publisher are probe-agnostic.
+  change - the CLI, runner, and publisher are probe-agnostic.

@@ -14,6 +14,7 @@ import time
 
 from src.core.models import Evidence, ProbeStatus, ProbeType
 from src.core.config import ProbeConfig
+from src.core.confidence import calculate_confidence
 
 
 def _resolve_via_system(target: str, timeout_s: float) -> tuple[list[str], float]:
@@ -49,6 +50,11 @@ def run(config: ProbeConfig, job_id: str | None = None) -> Evidence:
         else:
             ip_list, elapsed_ms = _resolve_via_system(target, config.dns_timeout_s)
             resolver_used = "system default"
+            
+        confidence = calculate_confidence(
+            status=ProbeStatus.OK,
+            latency_ms=elapsed_ms
+        )
 
         return Evidence(
             probe_type=ProbeType.DNS,
@@ -57,17 +63,29 @@ def run(config: ProbeConfig, job_id: str | None = None) -> Evidence:
             latency_ms=round(elapsed_ms, 2),
             message=f"Resolved to {len(ip_list)} address(es) via {resolver_used}",
             raw={"resolved_ips": ip_list, "resolver": resolver_used},
+            confidence=confidence,
             job_id=job_id,
         )
 
     except socket.gaierror as exc:
+        
+        confidence = calculate_confidence(
+            status=ProbeStatus.FAILED
+        )
+        
         return Evidence(
             probe_type=ProbeType.DNS,
             target=target,
             status=ProbeStatus.FAILED,
             message="DNS resolution failed (name does not resolve)",
             error=str(exc),
+            confidence=confidence,
             job_id=job_id,
         )
+        
     except Exception as exc:  # noqa: BLE001
-        return Evidence.error_result(ProbeType.DNS, target, exc, job_id=job_id)
+        
+        confidence = calculate_confidence(
+            status=ProbeStatus.ERROR
+        )
+        return Evidence.error_result(ProbeType.DNS, target, exc, confidence, job_id=job_id)

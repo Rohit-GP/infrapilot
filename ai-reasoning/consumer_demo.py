@@ -65,8 +65,11 @@ def main() -> None:
             for message_id, fields in messages:
                 evidence = json.loads(fields["evidence"])
                 print(
-                    f"[{message_id}] probe={evidence['probe_type']:8s} "
-                    f"status={evidence['status']:8s} target={evidence['target']} "
+                    f"[{message_id}] "
+                    f"probe={evidence['probe_type']:8s} "
+                    f"status={evidence['status']:8s} "
+                    f"confidence={evidence['confidence']:>3}% "
+                    f"target={evidence['target']} "
                     f"-> {evidence['message']}"
                 )
                 client.xack(STREAM, GROUP, message_id)

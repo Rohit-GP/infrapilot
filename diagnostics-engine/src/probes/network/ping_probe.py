@@ -15,6 +15,7 @@ import subprocess
 
 from src.core.models import Evidence, ProbeStatus, ProbeType
 from src.core.config import ProbeConfig
+from src.core.confidence import calculate_confidence
 
 
 def _build_command(target: str, count: int, timeout_s: float) -> list[str]:
@@ -62,6 +63,11 @@ def run(config: ProbeConfig, job_id: str | None = None) -> Evidence:
         else:
             status = ProbeStatus.FAILED
             message = "Host unreachable (100% packet loss or ping failed)"
+            
+        confidence = calculate_confidence(
+                    status=status,
+                    latency_ms=avg_latency
+                )
 
         return Evidence(
             probe_type=ProbeType.PING,
@@ -70,10 +76,20 @@ def run(config: ProbeConfig, job_id: str | None = None) -> Evidence:
             latency_ms=avg_latency,
             message=message,
             raw={"stdout": output, "returncode": result.returncode, "packet_loss_pct": loss_pct},
+            confidence=confidence,
             job_id=job_id,
         )
 
     except subprocess.TimeoutExpired as exc:
-        return Evidence.error_result(ProbeType.PING, target, exc, job_id=job_id)
+        confidence = calculate_confidence(
+                    status=ProbeStatus.FAILED
+                )
+        
+        return Evidence.error_result(ProbeType.PING, target, exc, confidence=confidence, job_id=job_id)
+    
     except Exception as exc:  # noqa: BLE001 - probes must never raise, always return Evidence
-        return Evidence.error_result(ProbeType.PING, target, exc, job_id=job_id)
+        confidence = calculate_confidence(
+                    status=ProbeStatus.ERROR
+                )
+        
+        return Evidence.error_result(ProbeType.PING, target, exc, confidence=confidence, job_id=job_id)

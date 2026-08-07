@@ -1,0 +1,44 @@
+sequenceDiagram
+    actor U as User
+    participant UI as React UI
+    participant API as Spring Boot (Orchestration)
+    participant PE as Python Probing Engine
+    participant R as Redis Streams
+    participant LG as LangGraph Agents
+    participant DB as PostgreSQL
+
+    U->>UI: Click "Run Diagnosis" (select target)
+    UI->>API: POST /diagnosis (target)
+    API->>DB: Create job (status = queued)
+    API-->>UI: 202 Accepted + job_id
+    UI->>API: Open WebSocket (STOMP) subscribe /jobs/{id}
+
+    API->>PE: Dispatch probe request (job_id, target)
+    API->>DB: Update job status = running
+    API-->>UI: WS push: status = running
+
+    PE->>PE: Run ping, DNS, port, log/service checks
+    PE->>R: Publish probe-result events (stream)
+
+    R->>LG: Consumer group signals evidence ready
+    LG->>LG: Network Agent evaluates evidence
+    LG->>LG: Database Agent evaluates evidence
+    LG->>LG: Infrastructure Agent evaluates evidence
+    LG->>LG: Coordinator merges findings into root cause, confidence, suggested fix
+
+    LG->>DB: Persist agent reasoning + incident summary
+    LG->>API: Notify result ready (job_id, verdict)
+
+    alt Suggested action is destructive
+        API->>DB: Create approval_request (status = pending)
+        API-->>UI: WS push: awaiting_approval + evidence + suggested action
+        U->>UI: Approve / Reject
+        UI->>API: POST /approval/{id}/decision
+        API->>DB: Update approval_request + remediation_log
+        API-->>UI: WS push: status = complete (decision recorded)
+    else Suggested action is safe / informational
+        API->>DB: Update job status = complete
+        API-->>UI: WS push: status = complete + full report
+    end
+
+    UI-->>U: Render evidence, root cause, confidence, suggested fix

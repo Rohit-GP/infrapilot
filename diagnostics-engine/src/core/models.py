@@ -48,6 +48,8 @@ class Evidence:
     message: str = ""
     raw: dict[str, Any] = field(default_factory=dict)
     error: Optional[str] = None
+    
+    confidence: int = 0
 
     job_id: Optional[str] = None
     evidence_id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -63,7 +65,7 @@ class Evidence:
         return json.dumps(self.to_dict(), default=str)
 
     @classmethod
-    def error_result(cls, probe_type: ProbeType, target: str, exc: Exception, **kwargs) -> "Evidence":
+    def error_result(cls, probe_type: ProbeType, target: str, exc: Exception, confidence: int = 0, **kwargs) -> "Evidence":
         """Convenience constructor for when a probe throws instead of completing."""
         return cls(
             probe_type=probe_type,
@@ -71,5 +73,6 @@ class Evidence:
             status=ProbeStatus.ERROR,
             message=f"{probe_type.value} probe raised an exception",
             error=str(exc),
+            confidence=confidence,
             **kwargs,
         )

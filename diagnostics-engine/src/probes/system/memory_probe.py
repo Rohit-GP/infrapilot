@@ -13,10 +13,12 @@ import psutil
 
 from src.core.config import ProbeConfig
 from src.core.models import Evidence, ProbeStatus, ProbeType
+from src.core.confidence import calculate_confidence
 
 
 def run(config: ProbeConfig, job_id: str) -> Evidence:
     start = time.perf_counter()
+
     try:
         vm = psutil.virtual_memory()
         swap = psutil.swap_memory()
@@ -34,17 +36,47 @@ def run(config: ProbeConfig, job_id: str) -> Evidence:
 
         if vm.percent >= config.memory_crit_pct:
             status = ProbeStatus.FAILED
-            message = f"Memory usage {vm.percent:.1f}% >= critical threshold {config.memory_crit_pct}%"
+            message = (
+                f"Memory usage {vm.percent:.1f}% >= "
+                f"critical threshold {config.memory_crit_pct}%"
+            )
+
         elif vm.percent >= config.memory_warn_pct:
             status = ProbeStatus.DEGRADED
-            message = f"Memory usage {vm.percent:.1f}% >= warning threshold {config.memory_warn_pct}%"
+            message = (
+                f"Memory usage {vm.percent:.1f}% >= "
+                f"warning threshold {config.memory_warn_pct}%"
+            )
+
         else:
             status = ProbeStatus.OK
             message = f"Memory usage normal ({vm.percent:.1f}%)"
 
-        return Evidence(
-            probe_type=ProbeType.MEMORY, target=config.target, status=status,
-            latency_ms=latency_ms, raw=raw, message=message, job_id=job_id,
+        confidence = calculate_confidence(
+            status=status,
         )
+
+        return Evidence(
+            probe_type=ProbeType.MEMORY,
+            target=config.target,
+            status=status,
+            latency_ms=latency_ms,
+            raw=raw,
+            message=message,
+            confidence=confidence,
+            job_id=job_id,
+        )
+
     except Exception as exc:  # noqa: BLE001
-        return Evidence.error_result(ProbeType.MEMORY, config.target, exc, job_id=job_id)
+
+        confidence = calculate_confidence(
+            status=ProbeStatus.ERROR
+        )
+
+        return Evidence.error_result(
+            ProbeType.MEMORY,
+            config.target,
+            exc,
+            confidence=confidence,
+            job_id=job_id,
+        )

@@ -21,8 +21,17 @@ import urllib.error
 
 from src.core.models import Evidence, ProbeStatus, ProbeType
 from src.core.config import ProbeConfig
+from src.core.confidence import calculate_confidence
 
-ERROR_PATTERNS = ("ERROR", "FATAL", "Exception", "Traceback", "panic:", "OOM", "refused")
+ERROR_PATTERNS = (
+    "ERROR",
+    "FATAL",
+    "Exception",
+    "Traceback",
+    "panic:",
+    "OOM",
+    "refused",
+)
 
 
 def _http_health_check(url: str, timeout_s: float) -> dict:
@@ -62,12 +71,19 @@ def _scan_log(path: str, tail_lines: int = 200) -> dict:
     try:
         with open(path, "r", errors="ignore") as f:
             lines = f.readlines()[-tail_lines:]
+
         hits = [
             ln.strip()
             for ln in lines
             if any(pattern.lower() in ln.lower() for pattern in ERROR_PATTERNS)
         ]
-        return {"scanned_lines": len(lines), "error_lines_found": len(hits), "sample": hits[:5]}
+
+        return {
+            "scanned_lines": len(lines),
+            "error_lines_found": len(hits),
+            "sample": hits[:5],
+        }
+
     except FileNotFoundError as e:
         return {"error": str(e)}
 
@@ -87,6 +103,7 @@ def run(config: ProbeConfig, job_id: str | None = None) -> Evidence:
                 config.service_check_url,
                 config.port_timeout_s,
             )
+
             raw["http_health"] = http_result
 
             code = http_result.get("status_code")
@@ -105,6 +122,7 @@ def run(config: ProbeConfig, job_id: str | None = None) -> Evidence:
         # Log scan
         if config.log_path:
             log_result = _scan_log(config.log_path)
+
             raw["log_scan"] = log_result
 
             if "error" in log_result:
@@ -119,37 +137,67 @@ def run(config: ProbeConfig, job_id: str | None = None) -> Evidence:
 
         # Nothing configured
         if not config.service_check_url and not config.log_path:
+
+            confidence = calculate_confidence(
+                status=ProbeStatus.DEGRADED
+            )
+
             return Evidence(
                 probe_type=ProbeType.SERVICE,
                 target=target,
                 status=ProbeStatus.DEGRADED,
                 message="No service_check_url or log_path configured - probe skipped",
+                confidence=confidence,
                 job_id=job_id,
             )
 
         # Determine final status
         if http_failed:
             status = ProbeStatus.FAILED
+
         elif log_degraded:
             status = ProbeStatus.DEGRADED
+
         else:
             status = ProbeStatus.OK
 
-        message = "; ".join(problems) if problems else "Service/log checks passed"
+        # Use HTTP latency if available
+        latency_ms = None
+        if "http_health" in raw:
+            latency_ms = raw["http_health"].get("latency_ms")
+
+        confidence = calculate_confidence(
+            status=status,
+            latency_ms=latency_ms,
+        )
+
+        message = (
+            "; ".join(problems)
+            if problems
+            else "Service/log checks passed"
+        )
 
         return Evidence(
             probe_type=ProbeType.SERVICE,
             target=target,
             status=status,
+            latency_ms=latency_ms,
             message=message,
             raw=raw,
+            confidence=confidence,
             job_id=job_id,
         )
 
     except Exception as exc:  # noqa: BLE001
+
+        confidence = calculate_confidence(
+            status=ProbeStatus.ERROR
+        )
+
         return Evidence.error_result(
             ProbeType.SERVICE,
             target,
             exc,
+            confidence=confidence,
             job_id=job_id,
         )
