@@ -68,12 +68,12 @@ the LangGraph reasoning workflow is integrated.
 
 ## Agents
 
-* **Network Agent** — analyzes DNS, Ping, and TCP port evidence.
-* **System Agent** — analyzes CPU, memory, disk, process, and service evidence.
-* **Application Agent** — analyzes HTTP, SSL, and application/service evidence.
-* **Evidence Agent** — evaluates and correlates observations from multiple
+* **Network Agent** - analyzes DNS, Ping, and TCP port evidence.
+* **System Agent** - analyzes CPU, memory, disk, process, and service evidence.
+* **Application Agent** - analyzes HTTP, SSL, and application/service evidence.
+* **Evidence Agent** - evaluates and correlates observations from multiple
   evidence sources.
-* **Supervisor Agent** — coordinates agent findings and produces the final
+* **Supervisor Agent** - coordinates agent findings and produces the final
   diagnostic assessment.
 
 The **Cloud LLM** provides the language-model reasoning capability used by
