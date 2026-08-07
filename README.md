@@ -15,7 +15,7 @@ InfraPilot is a lightweight implementation of an Agentic Network Operations Cent
                               │
                               ▼
                     ┌────────────────────┐
-                    │ Spring Boot Backend│
+                    │     Fast API       │
                     └─────────┬──────────┘
                               │
                               ▼
@@ -59,7 +59,7 @@ Redis Streams
 LangGraph AI Agents
       │
       ▼
-Spring Boot Orchestrator
+FastAPI Orchestrator
       │
       ▼
 React Dashboard
@@ -88,7 +88,7 @@ The AI agents reason over collected evidence rather than executing diagnostics d
 | Layer | Technology |
 |--------|------------|
 | Frontend | React |
-| Backend | Spring Boot |
+| Backend | FastAPI |
 | Diagnostics Engine | Python (`asyncio`) |
 | AI Reasoning | LangGraph |
 | Messaging | Redis Streams |
@@ -131,7 +131,7 @@ Current implementation status:
 - ✅ Repository structure
 - ✅ Python diagnostics engine
 - ✅ Redis Streams integration
-- 🚧 Spring Boot orchestration
+- 🚧 FastAPI orchestration
 - 🚧 LangGraph multi-agent reasoning
 - 🚧 PostgreSQL persistence
 - 🚧 React dashboard
