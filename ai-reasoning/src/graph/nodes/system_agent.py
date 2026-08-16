@@ -83,7 +83,10 @@ def system_agent(
             usage = _get_percentage(
                 raw,
                 (
+<<<<<<< HEAD
                     "cpu_percent_overall",
+=======
+>>>>>>> 3abd7385429267f861b24ad5986b496c491b3904
                     "usage_percent",
                     "cpu_percent",
                     "percent",
@@ -134,8 +137,12 @@ def system_agent(
 
             usage = _get_percentage(
                 raw,
+<<<<<<< HEAD
                 (     
                     "used_percent",
+=======
+                (
+>>>>>>> 3abd7385429267f861b24ad5986b496c491b3904
                     "usage_percent",
                     "memory_percent",
                     "percent",
@@ -187,8 +194,11 @@ def system_agent(
             usage = _get_percentage(
                 raw,
                 (
+<<<<<<< HEAD
                     "worst_used_percent",
                     "used_percent",
+=======
+>>>>>>> 3abd7385429267f861b24ad5986b496c491b3904
                     "usage_percent",
                     "disk_percent",
                     "percent",

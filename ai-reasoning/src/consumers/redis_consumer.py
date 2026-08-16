@@ -515,8 +515,12 @@ class RedisEvidenceConsumer:
                     f"[redis] connection error: {exc}"
                 )
 
+<<<<<<< HEAD
                 time.sleep(2)
                 
 if __name__ == "__main__":
     consumer = RedisEvidenceConsumer()
     consumer.run()
+=======
+                time.sleep(2)
+>>>>>>> 3abd7385429267f861b24ad5986b496c491b3904
