@@ -1,5 +1,10 @@
+# Core dependencies
 redis==5.0.8
 python-dotenv==1.0.1
-# LangGraph + LLM client deps get added in Phase 4:
-# langgraph==0.2.*
-# langchain-groq==0.1.*        # or langchain-google-genai for Gemini Flash
+
+# LangGraph orchestration
+langgraph==1.2.9
+
+# Phase 4 — LLM integration
+# langchain-groq==0.1.*
+# langchain-google-genai
