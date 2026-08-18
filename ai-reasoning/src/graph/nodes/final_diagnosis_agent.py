@@ -1,321 +1,135 @@
 """
-Final diagnosis agent.
+Final Diagnosis Agent.
 
-Consumes validated specialist findings and produces the final
-root cause, diagnosis confidence, and recommendations.
+Consumes the validated specialist findings and produces the deterministic
+final diagnosis. Per the AI Reasoning Layer README, this agent:
 
-No LLM is used yet. The implementation is deterministic and
-evidence-backed so that an LLM can later be added.
+* separates healthy findings from problematic ones,
+* ranks problematic findings by severity and evidence confidence,
+* selects the strongest current root-cause candidate,
+* calculates diagnosis confidence,
+* generates evidence-backed recommendations,
+* produces a structured diagnosis that can later be passed to the Cloud LLM.
+
+No LLM is involved here - everything is deterministic and evidence-backed,
+same as the rest of the current pipeline.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
-from ..state import DiagnosisState
+from src.graph.state import SEVERITY_WEIGHT, GraphState
+from src.llm.client import build_llm_input
 
+DEFAULT_RECOMMENDATION = (
+    "Continue monitoring the target and collect additional evidence if the problem persists."
+)
 
-SEVERITY_SCORE = {
-    "low": 0,
-    "medium": 1,
-    "high": 2,
-    "critical": 3,
+# Evidence-backed remediation hints per probe. Only used when the probe's
+# finding is actually a problem (severity above "low"); kept intentionally
+# short/factual - this is not the explanatory layer, that's the Cloud LLM's job.
+RECOMMENDATIONS_BY_PROBE: dict[str, str] = {
+    "dns": "Verify the DNS record and resolver configuration for the target.",
+    "ping": "Check network path/firewall rules between the diagnostics engine and the target.",
+    "port": "Confirm the service is listening on the expected port and not blocked by a firewall.",
+    "http": "Inspect the application/service logs for the failing HTTP endpoint.",
+    "ssl": "Renew or reissue the TLS certificate before it expires.",
+    "service": "Investigate the service health endpoint and recent application logs for errors.",
+    "cpu": "Investigate processes consuming CPU on the target host, or scale compute resources.",
+    "memory": "Investigate memory usage on the target host and consider scaling or restarting the affected process.",
+    "disk": "Free up disk space on the affected mount or provision additional storage.",
 }
 
 
-def _score(finding: dict[str, Any]) -> int:
-    severity = str(
-        finding.get("severity", "low")
-    ).lower()
-
-    return SEVERITY_SCORE.get(
-        severity,
-        0,
-    )
-
-
-def _recommendation(
-    finding: dict[str, Any],
-) -> str | None:
-
-    probe = finding.get("probe_type")
-    severity = str(
-        finding.get("severity", "")
-    ).lower()
-
-    if severity not in {"critical", "high"}:
-        return None
-
-    recommendations = {
-        "ping": (
-            "Investigate host reachability, routing, "
-            "firewall rules, and packet loss."
-        ),
-        "dns": (
-            "Investigate DNS resolution, DNS server "
-            "availability, records, and resolver configuration."
-        ),
-        "port": (
-            "Investigate firewall rules, listening services, "
-            "network ACLs, and TCP connectivity."
-        ),
-        "http": (
-            "Inspect application health, server errors, "
-            "upstream dependencies, and HTTP response latency."
-        ),
-        "ssl": (
-            "Inspect the TLS certificate, certificate chain, "
-            "expiry date, and server TLS configuration."
-        ),
-        "service": (
-            "Inspect the service health, process state, "
-            "dependencies, and recent service logs."
-        ),
-        "cpu": (
-            "Identify CPU-intensive processes and investigate "
-            "unexpected workload or resource saturation."
-        ),
-        "memory": (
-            "Inspect memory-consuming processes, memory pressure, "
-            "and possible memory leaks."
-        ),
-        "disk": (
-            "Free disk capacity and investigate processes or "
-            "logs consuming excessive storage."
-        ),
-    }
-
-    return recommendations.get(probe)
-
-
-def _evidence_confidence(
-    finding: dict[str, Any],
-) -> float:
-
-    """
-    Convert diagnostics-engine evidence confidence
-    from 0-100 into 0.0-1.0.
-    """
-
-    value = finding.get("evidence", {}).get(
-        "confidence"
-    )
-
-    if value is None:
-        value = finding.get("confidence")
-
-    try:
-        value = float(value)
-    except (TypeError, ValueError):
-        return 0.5
-
-    # Support both 0-100 and 0.0-1.0 formats.
-    if value > 1:
-        value /= 100.0
-
-    return max(
-        0.0,
-        min(value, 1.0),
-    )
-
-
-def final_diagnosis_agent(
-    state: DiagnosisState,
-) -> dict[str, Any]:
-
-    validated = list(
-        state.get(
-            "validated_findings",
-            [],
-        )
-    )
-
-    # ---------------------------------------------------------
-    # No validated evidence
-    # ---------------------------------------------------------
-
-    if not validated:
-
-        return {
-            "root_cause": (
-                "Insufficient evidence to determine a root cause."
-            ),
-            "confidence": 0.0,
-            "recommendations": [
-                "Run diagnostics and collect additional evidence."
-            ],
-        }
-
-    # ---------------------------------------------------------
-    # Separate healthy findings from actual problems.
-    #
-    # Healthy findings are useful evidence, but should NOT
-    # become the root cause.
-    # ---------------------------------------------------------
-
-    problematic_findings = [
-        finding
-        for finding in validated
-        if _score(finding) > 0
-    ]
-
-    # ---------------------------------------------------------
-    # No problem detected
-    # ---------------------------------------------------------
-
-    if not problematic_findings:
-
-        evidence_confidences = [
-            _evidence_confidence(finding)
-            for finding in validated
-        ]
-
-        average_confidence = (
-            sum(evidence_confidences)
-            / len(evidence_confidences)
-        )
-
-        # Healthy evidence from multiple probes increases
-        # confidence that no significant fault was detected.
-        coverage_bonus = min(
-            len(validated) * 0.02,
-            0.10,
-        )
-
-        confidence = min(
-            average_confidence + coverage_bonus,
-            0.95,
-        )
-
-        return {
-            "root_cause": (
-                "No significant infrastructure fault detected."
-            ),
-            "confidence": round(
-                confidence,
-                2,
-            ),
-            "recommendations": [
-                "Continue monitoring the target and collect "
-                "additional evidence if the problem persists."
-            ],
-        }
-
-    # ---------------------------------------------------------
-    # Rank actual problems by severity first, then evidence
-    # confidence.
-    # ---------------------------------------------------------
-
-    problematic_findings.sort(
-        key=lambda finding: (
-            _score(finding),
-            _evidence_confidence(finding),
-        ),
+def _rank(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        findings,
+        key=lambda f: (SEVERITY_WEIGHT.get(f["severity"], 0), f.get("confidence", 0)),
         reverse=True,
     )
 
-    strongest = problematic_findings[0]
 
-    strongest_score = _score(
-        strongest
-    )
+def _confidence(root: dict[str, Any], all_findings: list[dict[str, Any]]) -> float:
+    """Root-cause confidence: how much of the total evidence "weight" points
+    at the root candidate, scaled by how confident we are in that evidence.
 
-    strongest_evidence_confidence = (
-        _evidence_confidence(strongest)
-    )
+    A single clear problem among mostly-healthy findings scores high; a
+    problem that's one of several competing issues (or backed by low-
+    confidence evidence) scores lower - reflecting genuine ambiguity rather
+    than false precision.
+    """
+    total_weight = sum(SEVERITY_WEIGHT.get(f["severity"], 0) for f in all_findings)
+    if total_weight == 0:
+        return 0.0
 
-    # ---------------------------------------------------------
-    # Base diagnosis confidence from severity.
-    # ---------------------------------------------------------
+    root_weight = SEVERITY_WEIGHT.get(root["severity"], 0)
+    evidence_confidence = root.get("confidence", 0) / 100
 
-    if strongest_score == 3:
-        base_confidence = 0.80
+    return round((root_weight / total_weight) * evidence_confidence, 2)
 
-    elif strongest_score == 2:
-        base_confidence = 0.65
 
+def _recommendations(problems: list[dict[str, Any]]) -> list[str]:
+    if not problems:
+        return [DEFAULT_RECOMMENDATION]
+
+    recs: list[str] = []
+    for finding in problems:
+        rec = RECOMMENDATIONS_BY_PROBE.get(finding["probe"])
+        if rec and rec not in recs:
+            recs.append(rec)
+
+    return recs or [DEFAULT_RECOMMENDATION]
+
+
+def run(state: GraphState) -> dict:
+    validated_findings = state.get("validated_findings", [])
+
+    healthy = [f for f in validated_findings if f["severity"] == "low"]
+    problems = _rank([f for f in validated_findings if f["severity"] != "low"])
+
+    if problems:
+        root = problems[0]
+        root_cause = root["finding"]
+        confidence = _confidence(root, validated_findings)
     else:
-        base_confidence = 0.45
+        root = None
+        root_cause = "No significant issues detected."
+        confidence = round(len(healthy) / len(validated_findings), 2) if validated_findings else 0.0
 
-    # ---------------------------------------------------------
-    # Adjust using the confidence of the actual evidence.
-    # ---------------------------------------------------------
-
-    confidence = (
-        base_confidence
-        * strongest_evidence_confidence
-    )
-
-    # ---------------------------------------------------------
-    # Multiple independent problematic findings provide
-    # additional support.
-    # ---------------------------------------------------------
-
-    supporting_findings = [
-        finding
-        for finding in problematic_findings
-        if finding.get("probe_type")
-        != strongest.get("probe_type")
-    ]
-
-    confidence += min(
-        len(supporting_findings) * 0.05,
-        0.15,
-    )
-
-    confidence = min(
-        confidence,
-        0.95,
-    )
-
-    # ---------------------------------------------------------
-    # Determine root cause.
-    # ---------------------------------------------------------
-
-    root_cause = strongest.get(
-        "finding",
-        "Infrastructure issue detected.",
-    )
-
-    # ---------------------------------------------------------
-    # Generate recommendations.
-    # ---------------------------------------------------------
-
-    recommendations: list[str] = []
-
-    seen: set[str] = set()
-
-    for finding in problematic_findings:
-
-        recommendation = _recommendation(
-            finding
-        )
-
-        if (
-            recommendation
-            and recommendation not in seen
-        ):
-
-            recommendations.append(
-                recommendation
-            )
-
-            seen.add(
-                recommendation
-            )
-
-    if not recommendations:
-
-        recommendations.append(
-            "Continue monitoring the target and collect "
-            "additional evidence if the problem persists."
-        )
-
-    return {
+    diagnosis = {
+        "job_id": state.get("job_id"),
+        "target": state.get("target"),
         "root_cause": root_cause,
-        "confidence": round(
-            confidence,
-            2,
-        ),
-        "recommendations": recommendations,
+        "confidence": confidence,
+        "recommendations": _recommendations(problems),
+        "hypotheses": [
+            {
+                "agent": f["agent"],
+                "probe": f["probe"],
+                "finding": f["finding"],
+                "severity": f["severity"],
+                "confidence": f.get("confidence", 0),
+            }
+            for f in problems
+        ],
+        "healthy_findings_count": len(healthy),
     }
+
+    # --- LLM input ---------------------------------------------------
+    # Standardized, LLM-ready payload built from the validated findings
+    # (not the raw diagnostic evidence) - see ai-reasoning/README.md ->
+    # "LLM Input". The Cloud LLM itself isn't wired up yet (next phase),
+    # so we just build the payload here for now.
+    llm_input = build_llm_input(state, validated_findings)
+
+    # TEMPORARY: print the exact payload that will be sent to the Cloud LLM
+    # once that integration lands, so it can be inspected/verified during
+    # development. Remove this print once llm/client.py actually calls out
+    # to the LLM.
+    print("\n[final_diagnosis_agent] LLM input (temporary debug print):")
+    print(json.dumps(llm_input, indent=2, default=str))
+    print()
+
+    return {"diagnosis": diagnosis, "llm_input": llm_input}

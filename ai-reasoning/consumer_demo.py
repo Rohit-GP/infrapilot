@@ -1,82 +1,57 @@
 """
-Phase 2 verification tool - NOT the real AI reasoning layer.
+Demo script: tails the Redis evidence stream live and prints each piece of
+evidence as it arrives.
 
-This is a minimal consumer that reads evidence off the Redis Stream using
-the same consumer-group pattern the real LangGraph agents will use in
-Phase 4. Its only job is to prove "diagnostics engine -> Redis Stream ->
-something on the other end" actually works, before any LangGraph code
-exists.
+This is intentionally separate from the production RedisConsumer
+(src/consumers/redis_consumer.py) - it uses plain XREAD from '$' (only new
+messages) instead of a consumer group, so running it never competes for or
+acknowledges messages the real reasoning consumer needs to process. It's
+just for watching evidence flow in while developing/debugging, matching the
+"Watch Evidence on Redis Streams" step in the top-level README.
 
 Usage:
     python consumer_demo.py
-    (leave running in one terminal, then in another terminal run the
-     diagnostics engine with --publish)
-
-Ctrl+C to stop. Each message is XACK'd after printing, so re-running
-this script won't replay old evidence.
 """
 
 from __future__ import annotations
 
 import json
-import os
-import sys
 
 import redis
-from dotenv import load_dotenv
 
-load_dotenv()
-
-HOST = os.getenv("REDIS_HOST", "localhost")
-PORT = int(os.getenv("REDIS_PORT", "6379"))
-STREAM = os.getenv("REDIS_STREAM", "diagnostics:evidence")
-GROUP = os.getenv("REDIS_CONSUMER_GROUP", "reasoning-agents")
-CONSUMER_NAME = "consumer-demo-1"
-
-
-def ensure_group(client: redis.Redis) -> None:
-    try:
-        client.xgroup_create(name=STREAM, groupname=GROUP, id="0", mkstream=True)
-    except redis.exceptions.ResponseError as exc:
-        if "BUSYGROUP" not in str(exc):
-            raise
+from src.core.config import RedisConfig
 
 
 def main() -> None:
-    client = redis.Redis(host=HOST, port=PORT, decode_responses=True)
+    config = RedisConfig()
+    client = redis.Redis(host=config.host, port=config.port, decode_responses=True)
+
+    print(f"[demo] tailing stream='{config.stream_name}' on {config.host}:{config.port} (Ctrl+C to stop)")
+
+    last_id = "$"  # start from "now" - only show evidence published after the demo starts
+
     try:
-        client.ping()
-    except redis.exceptions.ConnectionError:
-        print(f"Could not connect to Redis at {HOST}:{PORT}. "
-              f"Start it with: docker compose up -d redis")
-        sys.exit(1)
+        while True:
+            messages = client.xread({config.stream_name: last_id}, count=10, block=1000)
+            if not messages:
+                continue
 
-    ensure_group(client)
-    print(f"Listening on stream '{STREAM}' as consumer '{CONSUMER_NAME}' in group '{GROUP}'...")
-    print("Run the diagnostics engine with --publish in another terminal to see evidence here.\n")
+            for _stream_name, entries in messages:
+                for message_id, fields in entries:
+                    last_id = message_id
+                    try:
+                        evidence = json.loads(fields["evidence"])
+                    except (KeyError, json.JSONDecodeError):
+                        print(f"[demo] could not parse message {message_id}: {fields}")
+                        continue
 
-    while True:
-        # Block up to 5s waiting for new messages ('>' = only undelivered ones)
-        response = client.xreadgroup(GROUP, CONSUMER_NAME, {STREAM: ">"}, count=10, block=5000)
-        if not response:
-            continue
-
-        for _stream_name, messages in response:
-            for message_id, fields in messages:
-                evidence = json.loads(fields["evidence"])
-                print(
-                    f"[{message_id}] "
-                    f"probe={evidence['probe_type']:8s} "
-                    f"status={evidence['status']:8s} "
-                    f"confidence={evidence['confidence']:>3}% "
-                    f"target={evidence['target']} "
-                    f"-> {evidence['message']}"
-                )
-                client.xack(STREAM, GROUP, message_id)
+                    print(
+                        f"[redis] evidence received job={evidence.get('job_id')} "
+                        f"probe={evidence.get('probe_type')} status={evidence.get('status')}"
+                    )
+    except KeyboardInterrupt:
+        print("\n[demo] stopped")
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\nStopped.")
+    main()

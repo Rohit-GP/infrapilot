@@ -1,9 +1,12 @@
-# Core dependencies
+# --- Redis Streams ---
 redis==5.0.8
 python-dotenv==1.0.1
 
+# --- Testing ---
+pytest==8.3.2
+
 # LangGraph orchestration
-langgraph==1.2.9
+langgraph==1.2.11
 
 # Phase 4 — LLM integration
 # langchain-groq==0.1.*

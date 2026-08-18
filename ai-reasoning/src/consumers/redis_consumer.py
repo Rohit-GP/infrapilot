@@ -1,526 +1,143 @@
 """
-Redis Streams consumer for InfraPilot AI reasoning.
+Redis Streams consumer for the AI Reasoning Layer (production consumer).
 
-Compatible with the existing diagnostics-engine publisher:
+Reads Evidence events published by the diagnostics engine (see
+diagnostics-engine/src/core/publisher.py) via a consumer group on the
+`diagnostics:evidence` stream, accumulates them by job_id, and runs the
+LangGraph workflow once a job's complete evidence set has arrived.
 
-    stream_name = diagnostics:evidence
-    consumer_group = reasoning-agents
-
-Publisher message format:
-
-    {
-        "evidence": "<Evidence.to_json()>"
-    }
-
-The consumer aggregates evidence by job_id.
-
-As evidence arrives, the current accumulated diagnosis for that
-job is re-evaluated by LangGraph.
-
-No LLM is used.
+Job completion is detected two ways, whichever fires first (see
+src/core/config.py::ReasoningConfig):
+1. Evidence has been seen for every known probe type.
+2. No new evidence has arrived for the job for `job_idle_timeout_s` seconds.
 """
 
 from __future__ import annotations
 
 import json
-import os
-import socket
 import time
-from collections import defaultdict
+from dataclasses import dataclass, field
 from typing import Any
 
 import redis
 
-from src.graph.workflow import build_diagnosis_graph
+from src.core.config import ReasoningConfig, RedisConfig
+from src.graph.workflow import run_workflow
 
 
-class RedisEvidenceConsumer:
+@dataclass
+class _JobAccumulator:
+    target: str = ""
+    evidence: list[dict[str, Any]] = field(default_factory=list)
+    probe_types_seen: set[str] = field(default_factory=set)
+    last_seen: float = field(default_factory=time.time)
 
-    def __init__(
-        self,
-        stream_name: str | None = None,
-        consumer_group: str | None = None,
-        consumer_name: str | None = None,
-        host: str | None = None,
-        port: int | None = None,
-    ):
+    def add(self, ev: dict[str, Any]) -> None:
+        self.target = ev.get("target") or self.target
+        self.evidence.append(ev)
+        self.probe_types_seen.add(ev.get("probe_type"))
+        self.last_seen = time.time()
 
-        self.host = host or os.getenv(
-            "REDIS_HOST",
-            "localhost",
-        )
+    def is_complete(self, config: ReasoningConfig) -> bool:
+        if set(config.known_probe_types) <= self.probe_types_seen:
+            return True
+        return (time.time() - self.last_seen) >= config.job_idle_timeout_s
 
-        self.port = port or int(
-            os.getenv(
-                "REDIS_PORT",
-                "6379",
+
+class RedisConsumer:
+    def __init__(self, redis_config: RedisConfig | None = None, reasoning_config: ReasoningConfig | None = None):
+        self.redis_config = redis_config or RedisConfig()
+        self.reasoning_config = reasoning_config or ReasoningConfig()
+        self._client: redis.Redis | None = None
+        self._jobs: dict[str, _JobAccumulator] = {}
+
+    # --- connection setup -------------------------------------------------
+    def _get_client(self) -> redis.Redis:
+        if self._client is None:
+            self._client = redis.Redis(
+                host=self.redis_config.host,
+                port=self.redis_config.port,
+                decode_responses=True,
             )
-        )
+            self._ensure_group(self._client)
+        return self._client
 
-        self.stream_name = (
-            stream_name
-            or os.getenv(
-                "REDIS_STREAM",
-                "diagnostics:evidence",
-            )
-        )
-
-        self.consumer_group = (
-            consumer_group
-            or os.getenv(
-                "REDIS_CONSUMER_GROUP",
-                "reasoning-agents",
-            )
-        )
-
-        self.consumer_name = (
-            consumer_name
-            or os.getenv(
-                "REDIS_CONSUMER_NAME",
-                f"reasoning-{socket.gethostname()}",
-            )
-        )
-
-        self.client = redis.Redis(
-            host=self.host,
-            port=self.port,
-            decode_responses=True,
-        )
-
-        self.graph = build_diagnosis_graph()
-
-        # -----------------------------------------------------
-        # Accumulate evidence by diagnostics job.
-        #
-        # Example:
-        #
-        # {
-        #     "job-123": [
-        #         dns evidence,
-        #         ping evidence,
-        #         http evidence,
-        #     ]
-        # }
-        # -----------------------------------------------------
-
-        self.jobs: dict[
-            str,
-            list[dict[str, Any]]
-        ] = defaultdict(list)
-
-    # ---------------------------------------------------------
-    # Redis group
-    # ---------------------------------------------------------
-
-    def ensure_consumer_group(self) -> None:
-
+    def _ensure_group(self, client: redis.Redis) -> None:
+        """Idempotently create the stream (if missing) and the consumer
+        group. Mirrors EvidencePublisher._ensure_group - either side may be
+        the first to connect."""
         try:
-
-            self.client.xgroup_create(
-                name=self.stream_name,
-                groupname=self.consumer_group,
+            client.xgroup_create(
+                name=self.redis_config.stream_name,
+                groupname=self.redis_config.consumer_group,
                 id="0",
                 mkstream=True,
             )
-
-            print(
-                "[redis] consumer group created: "
-                f"{self.consumer_group}"
-            )
-
-        except redis.ResponseError as exc:
-
-            if "BUSYGROUP" in str(exc):
-
-                print(
-                    "[redis] consumer group already exists: "
-                    f"{self.consumer_group}"
-                )
-
-            else:
+        except Exception as exc:  # noqa: BLE001
+            if "BUSYGROUP" not in str(exc):
                 raise
 
-    # ---------------------------------------------------------
-    # Parse publisher message
-    # ---------------------------------------------------------
-
-    @staticmethod
-    def parse_evidence(
-        message: dict[str, Any],
-    ) -> dict[str, Any] | None:
-
-        evidence_json = message.get(
-            "evidence"
-        )
-
-        if not evidence_json:
-            return None
-
-        try:
-
-            evidence = json.loads(
-                evidence_json
-            )
-
-        except json.JSONDecodeError as exc:
-
-            print(
-                "[redis] invalid evidence JSON: "
-                f"{exc}"
-            )
-
-            return None
-
-        if not isinstance(
-            evidence,
-            dict,
-        ):
-            return None
-
-        return evidence
-
-    # ---------------------------------------------------------
-    # Add evidence to job
-    # ---------------------------------------------------------
-
-    def add_evidence(
-        self,
-        evidence: dict[str, Any],
-    ) -> str:
-
-        job_id = evidence.get(
-            "job_id"
-        )
-
-        if not job_id:
-
-            # Fallback for malformed/legacy evidence.
-            job_id = (
-                "unknown-"
-                + str(
-                    evidence.get(
-                        "evidence_id",
-                        time.time_ns(),
-                    )
-                )
-            )
-
-        # -----------------------------------------------------
-        # Avoid duplicate evidence.
-        # -----------------------------------------------------
-
-        evidence_id = evidence.get(
-            "evidence_id"
-        )
-
-        if evidence_id:
-
-            already_exists = any(
-                item.get("evidence_id")
-                == evidence_id
-                for item in self.jobs[job_id]
-            )
-
-            if already_exists:
-                return job_id
-
-        self.jobs[job_id].append(
-            evidence
-        )
-
-        return job_id
-
-    # ---------------------------------------------------------
-    # Run LangGraph
-    # ---------------------------------------------------------
-
-    def diagnose_job(
-        self,
-        job_id: str,
-    ) -> dict[str, Any]:
-
-        evidence = self.jobs.get(
-            job_id,
-            [],
-        )
-
-        if not evidence:
-
-            return {
-                "job_id": job_id,
-                "root_cause": (
-                    "No evidence available."
-                ),
-                "confidence": 0.0,
-            }
-
-        target = evidence[0].get(
-            "target",
-            "unknown",
-        )
-
-        initial_state = {
-            "job_id": job_id,
-            "target": target,
-            "evidence": evidence,
-
-            "network_findings": [],
-            "system_findings": [],
-            "application_findings": [],
-
-            "validated_findings": [],
-
-            "required_agents": [],
-
-            "root_cause": "",
-            "confidence": 0.0,
-            "recommendations": [],
-
-            "errors": [],
-        }
-
-        result = self.graph.invoke(
-            initial_state
-        )
-
-        return result
-
-    # ---------------------------------------------------------
-    # Process one Redis message
-    # ---------------------------------------------------------
-
-    def process_message(
-        self,
-        message_id: str,
-        message: dict[str, Any],
-    ) -> None:
-
-        evidence = self.parse_evidence(
-            message
-        )
-
-        if evidence is None:
-
-            print(
-                f"[redis] skipping invalid message "
-                f"{message_id}"
-            )
-
-            return
-
-        job_id = self.add_evidence(
-            evidence
-        )
-
-        probe_type = evidence.get(
-            "probe_type",
-            "unknown",
-        )
-
-        status = evidence.get(
-            "status",
-            "unknown",
-        )
-
+    # --- main loop ----------------------------------------------------
+    def run(self) -> None:
+        client = self._get_client()
         print(
-            f"[redis] evidence received "
-            f"job={job_id} "
-            f"probe={probe_type} "
-            f"status={status}"
-        )
-
-        # -----------------------------------------------------
-        # Run the current diagnosis using all evidence received
-        # so far for this job.
-        # -----------------------------------------------------
-
-        result = self.diagnose_job(
-            job_id
-        )
-
-        self.print_diagnosis(
-            result
-        )
-
-    # ---------------------------------------------------------
-    # Print diagnosis
-    # ---------------------------------------------------------
-
-    @staticmethod
-    def print_diagnosis(
-        result: dict[str, Any],
-    ) -> None:
-
-        print()
-        print("=" * 70)
-        print("INFRA PILOT DIAGNOSIS")
-        print("=" * 70)
-
-        print(
-            f"Job ID: {result.get('job_id')}"
-        )
-
-        print(
-            f"Target: {result.get('target')}"
-        )
-
-        print(
-            f"Root Cause: "
-            f"{result.get('root_cause')}"
-        )
-
-        print(
-            f"Confidence: "
-            f"{result.get('confidence')}"
-        )
-
-        print()
-        print("Required Agents:")
-
-        for agent in result.get(
-            "required_agents",
-            [],
-        ):
-            print(
-                f"  - {agent}"
-            )
-
-        print()
-        print("Validated Findings:")
-
-        for finding in result.get(
-            "validated_findings",
-            [],
-        ):
-
-            print(
-                f"  [{finding.get('severity')}] "
-                f"{finding.get('finding')}"
-            )
-
-        print()
-        print("Recommendations:")
-
-        for recommendation in result.get(
-            "recommendations",
-            [],
-        ):
-
-            print(
-                f"  - {recommendation}"
-            )
-
-        print("=" * 70)
-        print()
-
-    # ---------------------------------------------------------
-    # Consumer loop
-    # ---------------------------------------------------------
-
-    def run(
-        self,
-        block_ms: int = 5000,
-        count: int = 10,
-    ) -> None:
-
-        self.ensure_consumer_group()
-
-        print()
-        print(
-            "InfraPilot Redis Consumer"
-        )
-
-        print(
-            f"Redis: {self.host}:{self.port}"
-        )
-
-        print(
-            f"Stream: {self.stream_name}"
-        )
-
-        print(
-            f"Group: {self.consumer_group}"
-        )
-
-        print(
-            f"Consumer: {self.consumer_name}"
-        )
-
-        print()
-        print(
-            "Waiting for evidence..."
+            f"[redis] consumer '{self.redis_config.consumer_name}' listening on "
+            f"stream='{self.redis_config.stream_name}' group='{self.redis_config.consumer_group}'"
         )
 
         while True:
+            messages = client.xreadgroup(
+                groupname=self.redis_config.consumer_group,
+                consumername=self.redis_config.consumer_name,
+                streams={self.redis_config.stream_name: ">"},
+                count=10,
+                block=int(self.reasoning_config.poll_interval_s * 1000),
+            )
 
-            try:
+            if messages:
+                self._handle_messages(client, messages)
 
-                response = self.client.xreadgroup(
-                    groupname=self.consumer_group,
-                    consumername=self.consumer_name,
-                    streams={
-                        self.stream_name: ">"
-                    },
-                    count=count,
-                    block=block_ms,
-                )
+            self._check_completed_jobs()
 
-                if not response:
+    def _handle_messages(self, client: redis.Redis, messages) -> None:
+        for _stream_name, entries in messages:
+            for message_id, fields in entries:
+                try:
+                    evidence = json.loads(fields["evidence"])
+                except (KeyError, json.JSONDecodeError) as exc:
+                    print(f"[redis] WARNING: could not parse message {message_id}: {exc}")
+                    client.xack(self.redis_config.stream_name, self.redis_config.consumer_group, message_id)
                     continue
 
-                for (
-                    stream,
-                    messages,
-                ) in response:
-
-                    for (
-                        message_id,
-                        message,
-                    ) in messages:
-
-                        try:
-
-                            self.process_message(
-                                message_id,
-                                message,
-                            )
-
-                            self.client.xack(
-                                self.stream_name,
-                                self.consumer_group,
-                                message_id,
-                            )
-
-                        except Exception as exc:
-
-                            print(
-                                "[redis] processing error "
-                                f"for {message_id}: {exc}"
-                            )
-
-                            # Do not ACK a failed message.
-                            # Redis Streams can redeliver it.
-
-            except KeyboardInterrupt:
+                job_id = evidence.get("job_id") or "unknown-job"
+                self._jobs.setdefault(job_id, _JobAccumulator()).add(evidence)
 
                 print(
-                    "\n[redis] consumer stopped."
+                    f"[redis] evidence received job={job_id} "
+                    f"probe={evidence.get('probe_type')} status={evidence.get('status')}"
                 )
 
-                break
+                client.xack(self.redis_config.stream_name, self.redis_config.consumer_group, message_id)
 
-            except redis.RedisError as exc:
+    def _check_completed_jobs(self) -> None:
+        completed_job_ids = [
+            job_id for job_id, job in self._jobs.items() if job.evidence and job.is_complete(self.reasoning_config)
+        ]
 
-                print(
-                    f"[redis] connection error: {exc}"
-                )
+        for job_id in completed_job_ids:
+            job = self._jobs.pop(job_id)
+            print(f"[reasoning] job={job_id} evidence complete ({len(job.evidence)} probes) - running workflow")
+            self._run_workflow(job_id, job)
 
-<<<<<<< HEAD
-                time.sleep(2)
-                
+    def _run_workflow(self, job_id: str, job: _JobAccumulator) -> None:
+        try:
+            final_state = run_workflow(job_id=job_id, target=job.target, evidence=job.evidence)
+        except Exception as exc:  # noqa: BLE001 - keep the consumer alive across a bad job
+            print(f"[reasoning] ERROR: workflow failed for job={job_id}: {exc}")
+            return
+
+        diagnosis = final_state.get("diagnosis", {})
+        print(f"[reasoning] job={job_id} diagnosis: {json.dumps(diagnosis, indent=2, default=str)}")
+        
 if __name__ == "__main__":
-    consumer = RedisEvidenceConsumer()
-    consumer.run()
-=======
-                time.sleep(2)
->>>>>>> 3abd7385429267f861b24ad5986b496c491b3904
+    RedisConsumer().run()

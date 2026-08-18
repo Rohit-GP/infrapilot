@@ -1,66 +1,30 @@
 """
-Supervisor agent.
+Supervisor Agent.
 
-Determines which reasoning domains are relevant to the evidence.
-
-Current domains:
-
-    network
-    system
-    application
-
-The supervisor does not use an LLM yet.
+Runs first, before the specialist agents. It doesn't diagnose anything -
+it just looks at which probe types actually reported evidence for this job
+and records which specialist agents have something to say
+(`required_agents`). The specialist agents still run unconditionally (they
+just produce an empty finding list when their domain has no evidence), but
+`required_agents` is threaded through to the Final Diagnosis Agent and the
+LLM input so the reasoning trail is explicit about which domains were
+actually in scope for a given job, matching the diagnostics engine's
+`--probes` subset.
 """
 
 from __future__ import annotations
 
-from typing import Any
-
-from ..state import DiagnosisState
+from src.graph.state import AGENT_PROBE_MAP, GraphState
 
 
-NETWORK_PROBES = {
-    "ping",
-    "dns",
-    "port",
-}
-
-SYSTEM_PROBES = {
-    "cpu",
-    "memory",
-    "disk",
-}
-
-APPLICATION_PROBES = {
-    "http",
-    "ssl",
-    "service",
-}
-
-
-def supervisor_agent(
-    state: DiagnosisState,
-) -> dict[str, Any]:
-
+def run(state: GraphState) -> dict:
     evidence = state.get("evidence", [])
+    probe_types_present = {ev.get("probe_type") for ev in evidence}
 
-    required: set[str] = set()
+    required_agents = sorted(
+        agent
+        for agent, probe_types in AGENT_PROBE_MAP.items()
+        if probe_types & probe_types_present
+    )
 
-    for item in evidence:
-
-        probe_type = str(
-            item.get("probe_type", "")
-        ).lower()
-
-        if probe_type in NETWORK_PROBES:
-            required.add("network")
-
-        if probe_type in SYSTEM_PROBES:
-            required.add("system")
-
-        if probe_type in APPLICATION_PROBES:
-            required.add("application")
-
-    return {
-        "required_agents": sorted(required)
-    }
+    return {"required_agents": required_agents}
