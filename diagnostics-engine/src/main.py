@@ -32,6 +32,7 @@ def parse_args() -> argparse.Namespace:
         help=f"Comma-separated probes to run. Available: {list(PROBE_REGISTRY.keys())}",
     )
     parser.add_argument("--publish", action="store_true", help="Publish evidence to Redis Stream")
+    parser.add_argument("--job-id", default=None, help="Use this job_id instead of generating a new one (e.g. when triggered by the backend)")
     return parser.parse_args()
 
 
@@ -52,7 +53,7 @@ def main() -> int:
     )
     probes = [p.strip() for p in args.probes.split(",") if p.strip()]
 
-    runner = DiagnosticsRunner(config, probes=probes)
+    runner = DiagnosticsRunner(config, probes=probes, job_id=args.job_id)
     results = runner.run()
 
     publisher = EvidencePublisher() if args.publish else None

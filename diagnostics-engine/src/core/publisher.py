@@ -12,6 +12,8 @@ of crashing the CLI.
 
 from __future__ import annotations
 
+import sys
+
 from src.core.config import RedisConfig
 from src.core.models import Evidence
 
@@ -52,8 +54,11 @@ class EvidencePublisher:
             client.xadd(self.config.stream_name, {"evidence": evidence.to_json()})
             return True
         except Exception as exc:  # noqa: BLE001
+            # stderr, not stdout - main.py's CLI output is a single JSON
+            # blob printed to stdout (consumed programmatically by the
+            # backend's probe_trigger service), so nothing else may share it.
             print(f"[publisher] WARNING: could not publish to Redis ({exc}). "
-                  f"Is Redis running? Continuing without it.")
+                  f"Is Redis running? Continuing without it.", file=sys.stderr)
             return False
 
     def stream_length(self) -> int | None:

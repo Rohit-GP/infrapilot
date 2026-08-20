@@ -34,10 +34,15 @@ PROBE_REGISTRY = {
 
 
 class DiagnosticsRunner:
-    def __init__(self, config: ProbeConfig, probes: list[str] | None = None):
+    def __init__(self, config: ProbeConfig, probes: list[str] | None = None, job_id: str | None = None):
         self.config = config
         self.probes = probes or list(PROBE_REGISTRY.keys())
-        self.job_id = str(uuid.uuid4())
+        # Callers that already minted a job_id (e.g. the FastAPI backend,
+        # which creates the DiagnosisJob row before triggering probes so it
+        # can return job_id to the client immediately) can pass it in here
+        # so Evidence.job_id lines up with that row. Defaults to generating
+        # a fresh one, same as before, for standalone CLI use.
+        self.job_id = job_id or str(uuid.uuid4())
 
     def run(self) -> list[Evidence]:
         results: list[Evidence] = []

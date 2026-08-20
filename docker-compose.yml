@@ -13,8 +13,51 @@ services:
       timeout: 3s
       retries: 5
 
-  # postgres, spring-boot, and the langgraph service get added here
-  # in Phases 3-5 as they're built.
+  postgres:
+    image: postgres:16-alpine
+    container_name: agentic-noc-postgres
+    environment:
+      POSTGRES_USER: infrapilot
+      POSTGRES_PASSWORD: infrapilot
+      POSTGRES_DB: infrapilot
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U infrapilot"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend-orchestration:
+    build: ./backend-orchestration
+    container_name: agentic-noc-backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://infrapilot:infrapilot@postgres:5432/infrapilot
+      JWT_SECRET_KEY: change-me-in-production
+      DIAGNOSTICS_ENGINE_DIR: /diagnostics-engine
+      DIAGNOSTICS_ENGINE_PYTHON: python3
+      CORS_ORIGINS: http://localhost:5173,http://localhost:3000
+    volumes:
+      # The diagnostics engine is invoked as a subprocess (see
+      # backend-orchestration/src/services/probe_trigger.py), so its
+      # source + its own venv/deps need to be reachable from this
+      # container. Simplest approach for now: mount it in read-only and
+      # install its requirements at container build/start time.
+      - ./diagnostics-engine:/diagnostics-engine:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # the langgraph (ai-reasoning) service gets added here once it's ready
+  # to run in a container alongside the others - for now it's run
+  # directly with `python -m src.main` per ai-reasoning/README.md.
 
 volumes:
   redis-data:
+  postgres-data:
